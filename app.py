@@ -328,7 +328,25 @@ section[data-testid="stSidebar"]{display:none!important}
 """, unsafe_allow_html=True)
 
 IMG_SIZE   = 224
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lung_cancer_model.keras')
+
+def _find_model():
+    candidates = [
+        'lung_cancer_model.keras',
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lung_cancer_model.keras'),
+        '/app/lung_cancer_model.keras',
+    ]
+    for root, dirs, files in os.walk('/app' if os.path.exists('/app') else '.'):
+        for fname in files:
+            if fname == 'lung_cancer_model.keras':
+                candidates.append(os.path.join(root, fname))
+        if root.count(os.sep) > 5:
+            break
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return 'lung_cancer_model.keras'
+
+MODEL_PATH = _find_model()
 CATEGORIES = ['Lung Adenocarcinoma', 'Lung Normal', 'Lung Squamous Cell Carcinoma']
 
 CLASS_INFO = {
@@ -354,35 +372,40 @@ if 'history' not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def load_model():
-    if os.path.exists(MODEL_PATH):
-        try:
+    import tensorflow as tf
+
+    found = os.path.exists(MODEL_PATH)
+    st.session_state['_model_path_debug'] = f"MODEL_PATH={MODEL_PATH} | exists={found}"
+
+    if not found:
+        st.error(f"Model file NOT found at: {MODEL_PATH}")
+        return None
+
+    # Try normal load first
+    try:
+        return keras.models.load_model(MODEL_PATH)
+    except Exception as e1:
+        pass
+
+    # Keras version mismatch fallback: strip unknown InputLayer kwargs
+    try:
+        from keras.layers import InputLayer as _OrigInputLayer
+        class _CompatInputLayer(_OrigInputLayer):
+            def __init__(self, *args, **kwargs):
+                kwargs.pop("batch_shape", None)
+                kwargs.pop("optional", None)
+                super().__init__(*args, **kwargs)
+        with tf.keras.utils.custom_object_scope({"InputLayer": _CompatInputLayer}):
             return keras.models.load_model(MODEL_PATH)
-        except Exception:
-            # Keras version mismatch: patch InputLayer to accept legacy args
-            import tensorflow as tf
-            from keras.layers import InputLayer as _OrigInputLayer
-
-            class _CompatInputLayer(_OrigInputLayer):
-                def __init__(self, *args, **kwargs):
-                    kwargs.pop("batch_shape", None)
-                    kwargs.pop("optional", None)
-                    super().__init__(*args, **kwargs)
-
-            with tf.keras.utils.custom_object_scope({"InputLayer": _CompatInputLayer}):
-                return keras.models.load_model(MODEL_PATH)
-    vgg = vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(IMG_SIZE,IMG_SIZE,3))
-    vgg.trainable = False
-    model = keras.Sequential([vgg,keras.layers.GlobalAveragePooling2D(),
-        keras.layers.Dense(1024,activation='relu'),keras.layers.Dense(512,activation='relu'),
-        keras.layers.Dense(3,activation='softmax')])
-    model.compile(optimizer='adam',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
-    return model
+    except Exception as e2:
+        st.error(f"Could not load model: {e2}")
+        return None
 
 def preprocess(image):
     img = image.convert('RGB').resize((IMG_SIZE, IMG_SIZE))
-    arr = np.array(img).astype(np.float32)          # RGB, 0-255
-    arr = np.expand_dims(arr, axis=0)               # add batch dim
-    arr = vgg16.preprocess_input(arr)               # BGR + ImageNet zero-center
+    arr = np.array(img).astype(np.float32)
+    arr = np.expand_dims(arr, axis=0)
+    arr = vgg16.preprocess_input(arr)   # converts RGB->BGR + subtracts ImageNet mean
     return arr
 
 def prob_bar(label,val,color):
@@ -643,6 +666,12 @@ with col_res:
         with st.spinner("Analyzing tissue sample…"):
             try:
                 model = load_model()
+                # Show debug path info so you can confirm the model was found
+                if '_model_path_debug' in st.session_state:
+                    st.caption(f"🔍 Debug: {st.session_state['_model_path_debug']}")
+                if model is None:
+                    st.error("Model could not be loaded. Check debug info above.")
+                    st.stop()
                 probs = model.predict(preprocess(image), verbose=0)[0]
                 idx   = int(np.argmax(probs))
                 cls   = CATEGORIES[idx]
