@@ -328,7 +328,7 @@ section[data-testid="stSidebar"]{display:none!important}
 """, unsafe_allow_html=True)
 
 IMG_SIZE   = 224
-MODEL_PATH = '/content/lung_cancer_model.keras'
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lung_cancer_model.keras')
 CATEGORIES = ['Lung Adenocarcinoma', 'Lung Normal', 'Lung Squamous Cell Carcinoma']
 
 CLASS_INFO = {
