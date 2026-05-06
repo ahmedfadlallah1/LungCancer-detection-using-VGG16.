@@ -373,6 +373,7 @@ if 'history' not in st.session_state:
 @st.cache_resource(show_spinner=False)
 def load_model():
     import tensorflow as tf
+    import json, zipfile, tempfile, shutil
 
     found = os.path.exists(MODEL_PATH)
     st.session_state['_model_path_debug'] = f"MODEL_PATH={MODEL_PATH} | exists={found}"
@@ -384,19 +385,41 @@ def load_model():
     # Try normal load first
     try:
         return keras.models.load_model(MODEL_PATH)
-    except Exception as e1:
+    except Exception:
         pass
 
-    # Keras version mismatch fallback: strip unknown InputLayer kwargs
+    # ── Keras version mismatch fix ──────────────────────────────────────────
+    # The .keras file is a ZIP. We patch config.json inside it to remove
+    # 'batch_shape' and 'optional' from every InputLayer, then load the copy.
     try:
-        from keras.layers import InputLayer as _OrigInputLayer
-        class _CompatInputLayer(_OrigInputLayer):
-            def __init__(self, *args, **kwargs):
-                kwargs.pop("batch_shape", None)
-                kwargs.pop("optional", None)
-                super().__init__(*args, **kwargs)
-        with tf.keras.utils.custom_object_scope({"InputLayer": _CompatInputLayer}):
-            return keras.models.load_model(MODEL_PATH)
+        tmpdir = tempfile.mkdtemp()
+        fixed_path = os.path.join(tmpdir, 'model_fixed.keras')
+
+        with zipfile.ZipFile(MODEL_PATH, 'r') as zin,              zipfile.ZipFile(fixed_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == 'config.json':
+                    cfg = json.loads(data.decode('utf-8'))
+                    cfg_str = json.dumps(cfg)
+                    # Remove the two offending keys from every InputLayer config
+                    import re
+                    def _clean_input_layer(m):
+                        obj = json.loads(m.group(0))
+                        obj.pop('batch_shape', None)
+                        obj.pop('optional', None)
+                        return json.dumps(obj)
+                    # Patch all InputLayer build_configs
+                    cfg_str = re.sub(
+                        r'\{[^{}]*"batch_shape"[^{}]*\}',
+                        _clean_input_layer,
+                        cfg_str
+                    )
+                    data = cfg_str.encode('utf-8')
+                zout.writestr(item, data)
+
+        model = keras.models.load_model(fixed_path)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return model
     except Exception as e2:
         st.error(f"Could not load model: {e2}")
         return None
