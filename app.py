@@ -379,9 +379,11 @@ def load_model():
     return model
 
 def preprocess(image):
-    img = image.convert('RGB').resize((IMG_SIZE,IMG_SIZE))
-    arr = cv2.cvtColor(np.array(img),cv2.COLOR_RGB2BGR).astype(np.float32)
-    return np.expand_dims(arr,axis=0)
+    img = image.convert('RGB').resize((IMG_SIZE, IMG_SIZE))
+    arr = np.array(img).astype(np.float32)          # RGB, 0-255
+    arr = np.expand_dims(arr, axis=0)               # add batch dim
+    arr = vgg16.preprocess_input(arr)               # BGR + ImageNet zero-center
+    return arr
 
 def prob_bar(label,val,color):
     pct = val*100
