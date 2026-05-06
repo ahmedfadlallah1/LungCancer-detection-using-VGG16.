@@ -328,9 +328,7 @@ section[data-testid="stSidebar"]{display:none!important}
 """, unsafe_allow_html=True)
 
 IMG_SIZE   = 224
-# ── Model path: relative to app.py so it works locally AND on Streamlit Cloud ──
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, 'lung_cancer_model.keras')
+MODEL_PATH = '/content/lung_cancer_model.keras'
 CATEGORIES = ['Lung Adenocarcinoma', 'Lung Normal', 'Lung Squamous Cell Carcinoma']
 
 CLASS_INFO = {
@@ -356,40 +354,28 @@ if 'history' not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def load_model():
-    """
-    Loads the trained .keras model from the same folder as app.py.
-    This works both locally and on Streamlit Cloud (streamlit.io).
-
-    How to deploy:
-      1. Put lung_cancer_model.keras in the root of your GitHub repo
-         (same level as app.py).
-      2. Push to GitHub, then connect the repo on share.streamlit.io.
-      3. Streamlit Cloud will install requirements.txt and find the model
-         next to app.py automatically.
-
-    If the model file is missing the app still starts — it falls back to
-    an untrained VGG16 backbone and shows a warning banner.
-    """
     if os.path.exists(MODEL_PATH):
-        return keras.models.load_model(MODEL_PATH)
+        try:
+            return keras.models.load_model(MODEL_PATH)
+        except Exception:
+            # Keras version mismatch: patch InputLayer to accept legacy args
+            import tensorflow as tf
+            from keras.layers import InputLayer as _OrigInputLayer
 
-    # ── Fallback: untrained architecture ──────────────────────────────
-    st.warning(
-        "⚠️ **Model file not found** — place `lung_cancer_model.keras` "
-        "in the same folder as `app.py` and redeploy. "
-        "Predictions are random until then.",
-        icon="⚠️",
-    )
+            class _CompatInputLayer(_OrigInputLayer):
+                def __init__(self, *args, **kwargs):
+                    kwargs.pop("batch_shape", None)
+                    kwargs.pop("optional", None)
+                    super().__init__(*args, **kwargs)
+
+            with tf.keras.utils.custom_object_scope({"InputLayer": _CompatInputLayer}):
+                return keras.models.load_model(MODEL_PATH)
     vgg = vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(IMG_SIZE,IMG_SIZE,3))
     vgg.trainable = False
-    model = keras.Sequential([
-        vgg,
-        keras.layers.GlobalAveragePooling2D(),
-        keras.layers.Dense(1024, activation='relu'),
-        keras.layers.Dense(512,  activation='relu'),
-        keras.layers.Dense(3,    activation='softmax'),
-    ])
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    model = keras.Sequential([vgg,keras.layers.GlobalAveragePooling2D(),
+        keras.layers.Dense(1024,activation='relu'),keras.layers.Dense(512,activation='relu'),
+        keras.layers.Dense(3,activation='softmax')])
+    model.compile(optimizer='adam',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
     return model
 
 def preprocess(image):
@@ -698,7 +684,7 @@ with col_res:
 
             except Exception as e:
                 st.error(f"Prediction error: {e}")
-                st.info("Make sure `lung_cancer_model.keras` is in the same folder as `app.py` in your GitHub repo, then redeploy.")
+                st.info("Make sure lung_cancer_model.keras is in the same folder.")
 
 # ══════════════════════════════════════════════════════
 # FOOTER
