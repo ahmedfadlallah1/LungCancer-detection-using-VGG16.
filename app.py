@@ -328,7 +328,9 @@ section[data-testid="stSidebar"]{display:none!important}
 """, unsafe_allow_html=True)
 
 IMG_SIZE   = 224
-MODEL_PATH = '/content/lung_cancer_model.keras'
+# ── Model path: looks for .h5 first (GitHub repo), then .keras ──────────────
+MODEL_PATH = 'lung_cancer_model.h5'       # place this file in your repo root
+MODEL_PATH_KERAS = 'lung_cancer_model.keras'  # alternative name
 CATEGORIES = ['Lung Adenocarcinoma', 'Lung Normal', 'Lung Squamous Cell Carcinoma']
 
 CLASS_INFO = {
@@ -354,22 +356,38 @@ if 'history' not in st.session_state:
 
 @st.cache_resource(show_spinner=False)
 def load_model():
-    if os.path.exists(MODEL_PATH):
-        try:
-            return keras.models.load_model(MODEL_PATH)
-        except Exception:
-            # Keras version mismatch: patch InputLayer to accept legacy args
-            import tensorflow as tf
-            from keras.layers import InputLayer as _OrigInputLayer
+    """
+    Load the trained lung cancer model from the repo.
 
-            class _CompatInputLayer(_OrigInputLayer):
-                def __init__(self, *args, **kwargs):
-                    kwargs.pop("batch_shape", None)
-                    kwargs.pop("optional", None)
-                    super().__init__(*args, **kwargs)
+    Priority order:
+      1. lung_cancer_model.h5   (upload your .h5 file to the GitHub repo root)
+      2. lung_cancer_model.keras
+      3. Falls back to a fresh, untrained VGG16 scaffold so the UI still loads.
 
-            with tf.keras.utils.custom_object_scope({"InputLayer": _CompatInputLayer}):
-                return keras.models.load_model(MODEL_PATH)
+    For Streamlit Community Cloud:
+      - Keep the file ≤ 100 MB, or store it in Git LFS / GitHub Releases and
+        download it here with requests/gdown before calling keras.models.load_model().
+    """
+    # Try .h5 first (the file you have: lung_cancer_model.h5)
+    for path in [MODEL_PATH, MODEL_PATH_KERAS]:
+        if os.path.exists(path):
+            return keras.models.load_model(path)
+
+    # ── Optional: download from GitHub Releases if the file is not in the repo ──
+    # Uncomment and fill in your URL if you host the model externally:
+    #
+    # import requests, tempfile
+    # MODEL_URL = "https://github.com/<user>/<repo>/releases/download/<tag>/lung_cancer_model.h5"
+    # tmp = tempfile.NamedTemporaryFile(suffix='.h5', delete=False)
+    # with requests.get(MODEL_URL, stream=True) as r:
+    #     r.raise_for_status()
+    #     for chunk in r.iter_content(chunk_size=8192):
+    #         tmp.write(chunk)
+    # tmp.close()
+    # return keras.models.load_model(tmp.name)
+
+    # Fallback: build a fresh (untrained) scaffold so the app doesn't crash
+    st.warning("⚠️ Model file not found. Add `lung_cancer_model.h5` to your repo root.")
     vgg = vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(IMG_SIZE,IMG_SIZE,3))
     vgg.trainable = False
     model = keras.Sequential([vgg,keras.layers.GlobalAveragePooling2D(),
@@ -379,11 +397,9 @@ def load_model():
     return model
 
 def preprocess(image):
-    img = image.convert('RGB').resize((IMG_SIZE, IMG_SIZE))
-    arr = np.array(img).astype(np.float32)          # RGB, 0-255
-    arr = np.expand_dims(arr, axis=0)               # add batch dim
-    arr = vgg16.preprocess_input(arr)               # BGR + ImageNet zero-center
-    return arr
+    img = image.convert('RGB').resize((IMG_SIZE,IMG_SIZE))
+    arr = cv2.cvtColor(np.array(img),cv2.COLOR_RGB2BGR).astype(np.float32)
+    return np.expand_dims(arr,axis=0)
 
 def prob_bar(label,val,color):
     pct = val*100
@@ -686,7 +702,7 @@ with col_res:
 
             except Exception as e:
                 st.error(f"Prediction error: {e}")
-                st.info("Make sure lung_cancer_model.keras is in the same folder.")
+                st.info("Make sure `lung_cancer_model.h5` (or `.keras`) is in the root of your GitHub repo.")
 
 # ══════════════════════════════════════════════════════
 # FOOTER
