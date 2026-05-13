@@ -26,7 +26,7 @@ Upload a lung tissue biopsy image and get an instant AI diagnosis with confidenc
 | Model | VGG16 Transfer Learning (ImageNet weights) |
 | Dataset | LC25000 — 25,000 labeled lung histopathology slides |
 | Classes | Lung Adenocarcinoma, Lung Normal, Lung Squamous Cell Carcinoma |
-| Accuracy | ~96% (Adenocarcinoma), ~99% (Squamous), ~100% (Normal) |
+| Accuracy | ~96% |
 | Speed | Results in under 2 seconds |
 | Input | JPG / PNG / TIFF histopathology images |
 | Deployment | Streamlit Community Cloud |
